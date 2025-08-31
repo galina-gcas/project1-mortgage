@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Ипотечный калькулятор</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Montserrat:wght@300;400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body>
+    <div class="page">
+        <header class="header">
+            <div class="brand">
+                <span class="brand-mark">◆</span>
+                <h1 class="brand-title">Ипотечный калькулятор</h1>
+                <span class="brand-mark">◆</span>
+            </div>
+
+        </header>
+
+        <main class="container">
+            <section class="card">
+                <form method="post" class="form" id="mortgage-form" novalidate>
+                    <div class="grid">
+                        <label class="field">
+                            <span class="label">Стоимость недвижимости</span>
+                            <input class="input deco" type="text" inputmode="decimal" name="principal" placeholder="Напр. 8 500 000" value="{{ form_initial.principal }}" required>
+                        </label>
+
+                        <label class="field">
+                            <span class="label">Первоначальный взнос</span>
+                            <input class="input deco" type="text" inputmode="decimal" name="down_payment" placeholder="Напр. 1 500 000" value="{{ form_initial.down_payment }}">
+                        </label>
+
+                        <label class="field">
+                            <span class="label">Срок (лет)</span>
+                            <input class="input deco" type="text" inputmode="numeric" name="years" placeholder="Напр. 20" value="{{ form_initial.years }}" required>
+                        </label>
+
+                        <label class="field" id="rate-field">
+                            <span class="label">Ставка (% годовых)</span>
+                            <input class="input deco" type="text" inputmode="decimal" name="rate" placeholder="Напр. 12.5" value="{{ form_initial.rate }}" required>
+                        </label>
+                    </div>
+
+                    <div class="prepayment-section" id="prepayment-section" style="display: {% if form_initial.prepayment_enabled %}block{% else %}none{% endif %};">
+                        <h3 class="section-subtitle">Досрочное погашение</h3>
+                        <div class="grid prepayment-grid">
+                            <label class="field">
+                                <span class="label">Месяц досрочного платежа</span>
+                                <input class="input deco" type="text" inputmode="numeric" name="prepay_month" placeholder="Напр. 36" value="{{ form_initial.prepay_month }}">
+                            </label>
+                            <label class="field">
+                                <span class="label">Сумма досрочного платежа</span>
+                                <input class="input deco" type="text" inputmode="decimal" name="prepay_amount" placeholder="Напр. 500 000" value="{{ form_initial.prepay_amount }}">
+                            </label>
+                            <label class="field">
+                                <span class="label">Стратегия</span>
+                                <select class="input deco" name="prepay_strategy">
+                                    <option value="reduce_payment" {% if form_initial.prepay_strategy == 'reduce_payment' %}selected{% endif %}>Уменьшить платёж</option>
+                                    <option value="reduce_term" {% if form_initial.prepay_strategy == 'reduce_term' %}selected{% endif %}>Уменьшить срок</option>
+                                </select>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="actions">
+                        <div class="checkboxes">
+                            <label class="checkbox-wrap">
+                                <input type="checkbox" name="is_installment" id="installment-checkbox" value="1" {% if form_initial.is_installment %}checked{% endif %}>
+                                <span class="checkbox-label">Рассрочка</span>
+                            </label>
+                            <label class="checkbox-wrap">
+                                <input type="checkbox" name="prepayment_enabled" id="prepayment-checkbox" value="1" {% if form_initial.prepayment_enabled %}checked{% endif %}>
+                                <span class="checkbox-label">Досрочное погашение</span>
+                            </label>
+                        </div>
+                        <button class="button" type="submit" id="calculate-btn">Рассчитать</button>
+                    </div>
+                </form>
+            </section>
+
+            {% if error_message %}
+            <section class="alert alert-error">
+                <div class="alert-title">Ошибка ввода</div>
+                <div class="alert-text">{{ error_message }}</div>
+            </section>
+            {% endif %}
+
+            {% if result %}
+            <section class="card result">
+                <h2 class="section-title">Результат</h2>
+                <div class="result-grid">
+                    <div class="kv">
+                        <div class="k">Ежемесячный платеж</div>
+                        <div class="v">{{ result.monthly_payment | money }} ₽</div>
+                    </div>
+                    <div class="kv">
+                        <div class="k">Итоговая сумма кредита</div>
+                        <div class="v">{{ result.total_paid | money }} ₽</div>
+                    </div>
+                    <div class="kv">
+                        <div class="k">Переплата по процентам</div>
+                        <div class="v emph">{{ result.overpayment | money }} ₽</div>
+                    </div>
+                    <div class="kv">
+                        <div class="k">Основной долг + проценты</div>
+                        <div class="v">{{ result.total_paid | money }} ₽</div>
+                    </div>
+                    <div class="kv">
+                        <div class="k">Платежей</div>
+                        <div class="v">{{ result.num_payments | intspace }}</div>
+                    </div>
+                    <div class="kv">
+                        <div class="k">Необходимый доход/мес (≈{{ (result.affordability_ratio * 100)|round(0) }}%)</div>
+                        <div class="v">{{ result.income_required | money }} ₽</div>
+                    </div>
+                </div>
+            </section>
+            {% endif %}
+
+            {% if result %}
+            <section class="card payments">
+                <div class="section-header">
+                    <h2 class="section-title">График платежей</h2>
+                    <button class="button export-btn" id="export-excel-btn">📊 Экспорт в Excel</button>
+                </div>
+                <div class="chart-stats">
+                    <div class="stat">
+                        <div class="stat-label">Платёж</div>
+                        <div class="stat-value">{{ result.monthly_payment | money }} ₽</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-label">Основной долг</div>
+                        <div class="stat-value">{{ result.principal | money }} ₽ ({{ ((result.principal / result.total_paid) * 100) | round(0) }}%)</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-label">Проценты</div>
+                        <div class="stat-value">{{ result.overpayment | money }} ₽ ({{ ((result.overpayment / result.total_paid) * 100) | round(0) }}%)</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-label">Основной долг + Проценты</div>
+                        <div class="stat-value">{{ result.total_paid | money }} ₽</div>
+                    </div>
+                </div>
+                <div class="charts-grid">
+                    <div class="pie-wrap">
+                        <div class="legend">
+                            <span class="legend-item"><i class="swatch sw-interest"></i>Проценты</span>
+                            <span class="legend-item"><i class="swatch sw-principal"></i>Основной долг</span>
+                        </div>
+                        <div class="chart-wrap pie">
+                            <canvas id="pieChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="line-wrap">
+                        <div class="legend right">
+                            <span class="legend-item"><i class="swatch sw-interest"></i>Проценты</span>
+                            <span class="legend-item"><i class="swatch sw-principal"></i>Основной долг</span>
+                        </div>
+                        <div class="chart-wrap">
+                            <canvas id="stackedChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+                <div class="table-wrap">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Месяц</th>
+                                <th>Платёж</th>
+                                <th>Основной долг</th>
+                                <th>Проценты</th>
+                                <th>Остаток</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in result.schedule %}
+                            <tr>
+                                <td>{{ row.month }}</td>
+                                <td>{{ row.payment | money }} ₽</td>
+                                <td>{{ row.principal_component | money }} ₽</td>
+                                <td>{{ row.interest_component | money }} ₽</td>
+                                <td>{{ row.remaining_balance | money }} ₽</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+            {% endif %}
+        </main>
+
+        <footer class="footer">
+        </footer>
+    </div>
+    <script>
+      const separators = {
+        group: ' ',
+        decimal: '.',
+      };
+
+      function formatWithSpaces(value, allowDecimal = true) {
+        if (value == null) return '';
+        let raw = String(value).replace(/\s+/g, '').replace(',', '.');
+        if (!allowDecimal) {
+          raw = raw.replace(/[^0-9-]/g, '');
+        } else {
+          raw = raw.replace(/[^0-9.-]/g, '');
+        }
+        if (raw === '' || raw === '-' || raw === '.') return raw;
+        const negative = raw.startsWith('-');
+        if (negative) raw = raw.slice(1);
+
+        let [intPart, decPart] = raw.split('.');
+        intPart = intPart.replace(/^0+(?!$)/, '');
+        intPart = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, separators.group);
+        if (allowDecimal && decPart !== undefined && decPart !== '') {
+          return (negative ? '-' : '') + intPart + separators.decimal + decPart;
+        }
+        return (negative ? '-' : '') + intPart;
+      }
+
+      function attachFormatter(input, allowDecimal = true) {
+        let last = input.value;
+        const handler = () => {
+          const start = input.selectionStart;
+          const before = input.value;
+          input.value = formatWithSpaces(before, allowDecimal);
+          last = input.value;
+          // Best-effort caret restore
+          const diff = input.value.length - before.length;
+          if (start != null) {
+            input.setSelectionRange(Math.max(0, start + diff), Math.max(0, start + diff));
+          }
+        };
+        input.addEventListener('input', handler);
+        // Initial format
+        input.value = formatWithSpaces(input.value, allowDecimal);
+      }
+
+      function normalizeForSubmit(value) {
+        return String(value).replace(/\s+/g, '').replace(',', '.');
+      }
+
+      function formatMoney(value) {
+        const num = Number(value || 0);
+        const sign = num < 0 ? '-' : '';
+        const abs = Math.abs(num);
+        const fixed = abs.toFixed(2);
+        const [intPart, decPart] = fixed.split('.');
+        const withSpaces = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+        return sign + withSpaces + (decPart ? ',' + decPart : '');
+      }
+
+      document.addEventListener('DOMContentLoaded', () => {
+        const form = document.getElementById('mortgage-form');
+        const principal = form.querySelector('input[name="principal"]');
+        const down = form.querySelector('input[name="down_payment"]');
+        const years = form.querySelector('input[name="years"]');
+        const rate = form.querySelector('input[name="rate"]');
+
+        attachFormatter(principal, true);
+        attachFormatter(down, true);
+        attachFormatter(years, false);
+        attachFormatter(rate, true);
+
+        form.addEventListener('submit', () => {
+          // Replace spaces before submit so backend gets clean numbers
+          principal.value = normalizeForSubmit(principal.value);
+          down.value = normalizeForSubmit(down.value);
+          years.value = normalizeForSubmit(years.value);
+          rate.value = normalizeForSubmit(rate.value);
+          
+          // Нормализуем поля досрочного погашения если они заполнены
+          const prepayMonth = form.querySelector('input[name="prepay_month"]');
+          const prepayAmount = form.querySelector('input[name="prepay_amount"]');
+          if (prepayMonth && prepayMonth.value) {
+            prepayMonth.value = normalizeForSubmit(prepayMonth.value);
+          }
+          if (prepayAmount && prepayAmount.value) {
+            prepayAmount.value = normalizeForSubmit(prepayAmount.value);
+          }
+        });
+
+        // Переключение между режимами ипотеки и рассрочки
+        const installmentCheckbox = document.getElementById('installment-checkbox');
+        const rateField = document.getElementById('rate-field');
+
+        function updateRateField() {
+          if (installmentCheckbox.checked) {
+            rateField.classList.add('rate-field-hidden');
+            rate.removeAttribute('required');
+            rate.value = '0';
+          } else {
+            rateField.classList.remove('rate-field-hidden');
+            rate.setAttribute('required', 'required');
+            if (rate.value === '0') {
+              rate.value = '';
+            }
+          }
+        }
+
+        // Инициализация состояния при загрузке страницы
+        updateRateField();
+
+        installmentCheckbox.addEventListener('change', updateRateField);
+
+        // Показ/скрытие секции досрочного погашения
+        const prepaymentCheckbox = document.getElementById('prepayment-checkbox');
+        const prepaymentSection = document.getElementById('prepayment-section');
+        const prepayMonth = form.querySelector('input[name="prepay_month"]');
+        const prepayAmount = form.querySelector('input[name="prepay_amount"]');
+
+        prepaymentCheckbox.addEventListener('change', () => {
+          if (prepaymentCheckbox.checked) {
+            prepaymentSection.style.display = 'block';
+            attachFormatter(prepayAmount, true);
+            attachFormatter(prepayMonth, false);
+          } else {
+            prepaymentSection.style.display = 'none';
+            prepayMonth.value = '';
+            prepayAmount.value = '';
+          }
+        });
+
+        // Инициализация форматирования для полей досрочного погашения если они видимы
+        if (prepaymentCheckbox.checked) {
+          attachFormatter(prepayAmount, true);
+          attachFormatter(prepayMonth, false);
+        }
+
+        // Экспорт в Excel через JavaScript
+        const exportBtn = document.getElementById('export-excel-btn');
+        if (exportBtn) {
+          exportBtn.addEventListener('click', () => {
+            exportToExcel();
+          });
+        }
+
+        function exportToExcel() {
+          if (typeof XLSX === 'undefined') {
+            alert('Библиотека XLSX не загружена. Экспорт недоступен.');
+            return;
+          }
+
+          // Создаём новую книгу Excel
+          const wb = XLSX.utils.book_new();
+          
+          // Собираем данные
+          const data = [];
+          
+          // Заголовок
+          data.push(['РАСЧЁТ ИПОТЕЧНОГО КРЕДИТА']);
+          data.push([]);
+          
+          // Параметры кредита
+          data.push(['ПАРАМЕТРЫ КРЕДИТА']);
+          {% if result %}
+          data.push(['Стоимость недвижимости:', '{{ (form_initial.principal | replace(" ", "") | float) | money }} ₽']);
+          {% if form_initial.down_payment %}
+          data.push(['Первоначальный взнос:', '{{ (form_initial.down_payment | replace(" ", "") | float) | money }} ₽']);
+          data.push(['Сумма кредита:', '{{ ((form_initial.principal | replace(" ", "") | float) - (form_initial.down_payment | replace(" ", "") | float)) | money }} ₽']);
+          {% endif %}
+          data.push(['Срок кредита:', '{{ form_initial.years }} лет ({{ result.num_payments }} месяцев)']);
+          data.push(['Процентная ставка:', '{{ form_initial.rate }}% годовых']);
+          {% if form_initial.prepayment_enabled and form_initial.prepay_month and form_initial.prepay_amount %}
+          data.push(['Досрочное погашение:', '{{ form_initial.prepay_amount }} ₽ в {{ form_initial.prepay_month }} месяце']);
+          {% endif %}
+          data.push([]);
+          
+          // Итоговые показатели
+          data.push(['ИТОГОВЫЕ ПОКАЗАТЕЛИ']);
+          data.push(['Ежемесячный платёж:', '{{ result.monthly_payment | money }} ₽']);
+          data.push(['Общая сумма выплат:', '{{ result.total_paid | money }} ₽']);
+          data.push(['Переплата:', '{{ result.overpayment | money }} ₽']);
+          data.push(['Необходимый доход:', '{{ result.income_required | money }} ₽']);
+          data.push([]);
+          
+          // График платежей
+          data.push(['ГРАФИК ПЛАТЕЖЕЙ']);
+          data.push(['Месяц', 'Платёж', 'Основной долг', 'Проценты', 'Остаток']);
+          
+          // Добавляем данные из таблицы
+          const table = document.querySelector('.table tbody');
+          if (table) {
+            const rows = table.querySelectorAll('tr');
+            rows.forEach(row => {
+              const cells = row.querySelectorAll('td');
+              if (cells.length >= 5) {
+                data.push([
+                  parseInt(cells[0].textContent.trim()),
+                  cells[1].textContent.trim(),
+                  cells[2].textContent.trim(), 
+                  cells[3].textContent.trim(),
+                  cells[4].textContent.trim()
+                ]);
+              }
+            });
+          }
+          {% endif %}
+          
+          // Создаём лист из данных
+          const ws = XLSX.utils.aoa_to_sheet(data);
+          
+          // Настройка стилей и ширины колонок
+          const range = XLSX.utils.decode_range(ws['!ref']);
+          
+          // Автоширина колонок
+          const colWidths = [];
+          for (let C = range.s.c; C <= range.e.c; ++C) {
+            let maxWidth = 10;
+            for (let R = range.s.r; R <= range.e.r; ++R) {
+              const cellRef = XLSX.utils.encode_cell({c: C, r: R});
+              const cell = ws[cellRef];
+              if (cell && cell.v) {
+                const cellValue = cell.v.toString();
+                maxWidth = Math.max(maxWidth, cellValue.length);
+              }
+            }
+            colWidths.push({wch: Math.min(maxWidth + 2, 50)});
+          }
+          ws['!cols'] = colWidths;
+          
+          // Добавляем лист в книгу
+          XLSX.utils.book_append_sheet(wb, ws, 'Расчёт ипотеки');
+          
+          // Генерируем имя файла с датой
+          const fileName = `mortgage_calculation_${new Date().toISOString().slice(0,10)}.xlsx`;
+          
+          // Скачиваем файл
+          XLSX.writeFile(wb, fileName);
+        }
+
+        // График без внешних библиотек (площадные серии: проценты и основная часть)
+        const chartEl = document.getElementById('stackedChart');
+        if (chartEl) {
+          const labels = {{ (result.chart_labels if result else []) | tojson }};
+          const seriesPrincipal = {{ (result.chart_principal_series if result else []) | tojson }};
+          const seriesInterest = {{ (result.chart_interest_series if result else []) | tojson }};
+
+          const paymentSeries = seriesPrincipal.map((v, i) => v + (seriesInterest[i] || 0));
+          const pctInterest = paymentSeries.map((p, i) => p ? (seriesInterest[i] / p) * 100 : 0);
+          const pctPrincipal = paymentSeries.map((p, i) => p ? (seriesPrincipal[i] / p) * 100 : 0);
+          const pctStackedTop = pctInterest.map((v, i) => v + pctPrincipal[i]); // ≈ 100
+
+          const dpr = window.devicePixelRatio || 1;
+          const rect = chartEl.getBoundingClientRect();
+          const width = Math.max(600, rect.width);
+          const height = 240;
+          chartEl.width = width * dpr;
+          chartEl.height = height * dpr;
+          const ctx = chartEl.getContext('2d');
+          ctx.scale(dpr, dpr);
+
+          const padding = { top: 20, right: 20, bottom: 28, left: 44 };
+          const innerW = width - padding.left - padding.right;
+          const innerH = height - padding.top - padding.bottom;
+          const wrap = chartEl.parentElement;
+          const tipLine = document.createElement('div');
+          tipLine.className = 'tooltip tooltip-line';
+          wrap.appendChild(tipLine);
+
+          function xAt(i) {
+            if (labels.length <= 1) return padding.left;
+            return padding.left + innerW * (i / (labels.length - 1));
+          }
+          function yAtPercent(percent) {
+            return padding.top + innerH - (percent / 100) * innerH;
+          }
+          function drawBand(lower, upper, color) {
+            ctx.beginPath();
+            ctx.moveTo(xAt(0), yAtPercent(lower[0]));
+            for (let i = 0; i < upper.length; i++) ctx.lineTo(xAt(i), yAtPercent(upper[i]));
+            for (let i = upper.length - 1; i >= 0; i--) ctx.lineTo(xAt(i), yAtPercent(lower[i]));
+            ctx.closePath();
+            ctx.fillStyle = color;
+            ctx.fill();
+          }
+          function drawGrid() {
+            ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+            ctx.lineWidth = 1;
+            for (let gy = 0; gy <= 4; gy++) {
+              const y = padding.top + innerH * (gy / 4);
+              ctx.beginPath();
+              ctx.moveTo(padding.left, y);
+              ctx.lineTo(width - padding.right, y);
+              ctx.stroke();
+            }
+            // Y labels (percent)
+            ctx.fillStyle = 'rgba(255,255,255,0.55)';
+            ctx.font = '12px Montserrat';
+            ctx.textAlign = 'right';
+            ctx.textBaseline = 'middle';
+            for (let p = 0; p <= 100; p += 25) {
+              const y = yAtPercent(p);
+              ctx.fillText(p + '%', padding.left - 8, y);
+            }
+          }
+          function render(hoverI = null) {
+            ctx.clearRect(0, 0, width, height);
+            drawGrid();
+            // stacked areas: interest (bottom), then principal (top band)
+            drawBand(new Array(labels.length).fill(0), pctInterest, 'rgba(231,193,98,0.35)');
+            drawBand(pctInterest, pctStackedTop, 'rgba(120,140,255,0.35)');
+
+            if (hoverI != null) {
+              // cursor marker only (без вертикальной линии)
+              const x = xAt(hoverI);
+              const yInt = yAtPercent(pctInterest[hoverI]);
+              const yTop = yAtPercent(pctStackedTop[hoverI]);
+              // shadow
+              ctx.fillStyle = 'rgba(0,0,0,0.25)';
+              ctx.beginPath(); ctx.arc(x+1.5, yInt+1.5, 5, 0, Math.PI*2); ctx.fill();
+              ctx.beginPath(); ctx.arc(x+1.5, yTop+1.5, 5, 0, Math.PI*2); ctx.fill();
+              // dots
+              ctx.fillStyle = '#e7c162';
+              ctx.beginPath(); ctx.arc(x, yInt, 5, 0, Math.PI*2); ctx.fill();
+              ctx.fillStyle = '#7c8cff';
+              ctx.beginPath(); ctx.arc(x, yTop, 5, 0, Math.PI*2); ctx.fill();
+
+              // tooltip near cursor (single instance for perf)
+              const pay = paymentSeries[hoverI] || 0;
+              const p = seriesPrincipal[hoverI] || 0;
+              const it = seriesInterest[hoverI] || 0;
+              const pp = pay ? (p / pay) * 100 : 0;
+              const ip = pay ? (it / pay) * 100 : 0;
+              tipLine.innerHTML = `Месяц ${labels[hoverI]}<br><span style="color:#7c8cff">Основной:</span> ${formatMoney(p)} ₽ (${pp.toFixed(0)}%)<br><span style="color:#e7c162">Проценты:</span> ${formatMoney(it)} ₽ (${ip.toFixed(0)}%)`;
+              // position near x, at top of chart area
+              const bounds = chartEl.getBoundingClientRect();
+              const relX = padding.left + innerW * (hoverI / (labels.length - 1));
+              tipLine.style.left = `${relX}px`;
+              tipLine.style.top = `${padding.top + 6}px`;
+              tipLine.classList.add('show');
+            }
+          }
+
+          // Не обновляем верхние поля при наведении — они показывают агрегаты за весь период
+          let hoverIndex = 0;
+          render(hoverIndex);
+
+          chartEl.addEventListener('mousemove', (e) => {
+            const bounds = chartEl.getBoundingClientRect();
+            const x = (e.clientX - bounds.left) * dpr;
+            // Convert back to CSS pixels for our scaled context
+            const rel = (e.clientX - bounds.left) / bounds.width;
+            const idx = Math.max(0, Math.min(labels.length - 1, Math.round(rel * (labels.length - 1))));
+            if (idx !== hoverIndex) {
+              hoverIndex = idx;
+              render(hoverIndex);
+            }
+          });
+          chartEl.addEventListener('mouseleave', () => {
+            render(hoverIndex);
+            tipLine.classList.remove('show');
+          });
+        }
+
+        // Pie chart: проценты vs основной долг по ВСЕМ выплатам
+        const pieEl = document.getElementById('pieChart');
+        if (pieEl) {
+          const dpr = window.devicePixelRatio || 1;
+          const rect = pieEl.getBoundingClientRect();
+          const size = Math.max(240, rect.width);
+          pieEl.width = size * dpr;
+          pieEl.height = size * dpr;
+          const ctx = pieEl.getContext('2d');
+          ctx.scale(dpr, dpr);
+
+          const totalInterest = {{ (result.overpayment if result else 0) | round(2) }};
+          const totalPrincipal = {{ (result.principal if result else 0) | round(2) }};
+          const sum = Math.max(1e-6, totalInterest + totalPrincipal);
+          const data = [totalInterest, totalPrincipal];
+          const colors = ['rgba(231,193,98,0.85)','rgba(120,140,255,0.85)'];
+          const labelsPie = ['Проценты','Основной долг'];
+
+          const cx = size / 2; const cy = size / 2; const r = Math.min(cx, cy) - 8;
+
+          function drawPie(hover = -1) {
+            ctx.clearRect(0,0,size,size);
+            let start = -Math.PI/2;
+            data.forEach((val, i) => {
+              const angle = (val/sum) * Math.PI * 2;
+              const end = start + angle;
+              ctx.beginPath();
+              ctx.moveTo(cx, cy);
+              ctx.arc(cx, cy, r + (i===hover?4:0), start, end);
+              ctx.closePath();
+              ctx.fillStyle = colors[i];
+              ctx.fill();
+              start = end;
+            });
+          }
+
+          const wrap = pieEl.parentElement;
+          let tip = document.createElement('div');
+          tip.className = 'tooltip';
+          tip.style.display = 'none';
+          wrap.style.position = 'relative';
+          wrap.appendChild(tip);
+
+          function showTip(x, y, i) {
+            const name = labelsPie[i];
+            const val = data[i];
+            tip.textContent = `${name}: ${formatMoney(val)} ₽`;
+            tip.style.left = x + 'px';
+            tip.style.top = y + 'px';
+            tip.style.display = 'block';
+          }
+          function hideTip(){ tip.style.display='none'; }
+
+          drawPie();
+
+          pieEl.addEventListener('mousemove', (e) => {
+            const bounds = pieEl.getBoundingClientRect();
+            const x = e.clientX - bounds.left; const y = e.clientY - bounds.top;
+            const dx = x - cx; const dy = y - cy;
+            const dist = Math.sqrt(dx*dx + dy*dy);
+            if (dist > r + 8) { drawPie(); hideTip(); return; }
+            let angle = Math.atan2(dy, dx);
+            angle = angle < -Math.PI/2 ? angle + Math.PI*2 : angle; // normalize to start at -PI/2
+            let start = -Math.PI/2;
+            for (let i=0;i<data.length;i++){
+              const end = start + (data[i]/sum)*Math.PI*2;
+              if (angle >= start && angle <= end) {
+                drawPie(i);
+                showTip(x, y, i);
+                return;
+              }
+              start = end;
+            }
+            drawPie(); hideTip();
+          });
+          pieEl.addEventListener('mouseleave', () => { drawPie(); hideTip(); });
+        }
+      });
+    </script>
+</body>
+</html>
+
+
